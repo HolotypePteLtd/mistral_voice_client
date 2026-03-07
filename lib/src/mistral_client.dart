@@ -6,6 +6,8 @@ import 'package:logging/logging.dart';
 
 import 'audio/transcription_request.dart';
 import 'audio/transcription_response.dart';
+import 'chat/chat_request.dart';
+import 'chat/chat_response.dart';
 import 'exceptions.dart';
 
 final _log = Logger('MistralClient');
@@ -139,6 +141,48 @@ class MistralClient {
     );
 
     onProgress?.call(1.0);
+
+    return result;
+  }
+
+  /// Send a chat completion request to the Mistral API.
+  ///
+  /// [request] - The chat request with model, messages, and optional parameters.
+  ///
+  /// Returns a [ChatResponse] with the generated completion.
+  /// Throws [MistralApiException] on API errors.
+  /// Throws [MistralNetworkException] on connection errors.
+  Future<ChatResponse> chat(ChatRequest request) async {
+    final uri = Uri.parse('$_baseUrl/v1/chat/completions');
+
+    _log.info('Starting chat request to $uri with model ${request.model}');
+
+    final response = await _httpClient.post(
+      uri,
+      headers: {
+        'Authorization': 'Bearer $_apiKey',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(request.toJson()),
+    );
+
+    _log.info('Chat API response status: ${response.statusCode}');
+
+    if (response.statusCode != 200) {
+      final apiErrorMessage = _parseErrorMessage(response.body);
+      _log.warning('Chat API error ${response.statusCode}: $apiErrorMessage');
+      throw MistralApiException(
+        'Chat API request failed',
+        statusCode: response.statusCode,
+        apiErrorMessage: apiErrorMessage,
+        rawBody: response.body,
+      );
+    }
+
+    final responseData = jsonDecode(response.body) as Map<String, dynamic>;
+    final result = ChatResponse.fromJson(responseData);
+
+    _log.info('Chat complete: ${result.choices.length} choices');
 
     return result;
   }
