@@ -52,7 +52,7 @@ class MistralClient {
 
     final uri = Uri.parse('$_baseUrl/v1/audio/transcriptions');
 
-    _log.info('Starting transcription request to $uri');
+    _log.info('POST $uri (model=${request.model})');
 
     final multipartRequest = http.MultipartRequest('POST', uri);
     multipartRequest.headers['Authorization'] = 'Bearer $_apiKey';
@@ -96,6 +96,7 @@ class MistralClient {
     onProgress?.call(0.3);
 
     // Send request
+    final stopwatch = Stopwatch()..start();
     final http.Response response;
     try {
       final streamedResponse = await _httpClient.send(multipartRequest);
@@ -112,14 +113,17 @@ class MistralClient {
       );
     }
 
-    onProgress?.call(0.7);
+    stopwatch.stop();
+    _log.info(
+      'Response ${response.statusCode} in ${stopwatch.elapsedMilliseconds}ms',
+    );
 
-    _log.info('API response status: ${response.statusCode}');
+    onProgress?.call(0.7);
 
     if (response.statusCode != 200) {
       final apiErrorMessage = _parseErrorMessage(response.body);
       _log.warning(
-        'API error ${response.statusCode}: $apiErrorMessage',
+        'Transcription API error ${response.statusCode}: $apiErrorMessage',
       );
       throw MistralApiException(
         'Transcription API request failed',
@@ -155,8 +159,9 @@ class MistralClient {
   Future<ChatResponse> chat(ChatRequest request) async {
     final uri = Uri.parse('$_baseUrl/v1/chat/completions');
 
-    _log.info('Starting chat request to $uri with model ${request.model}');
+    _log.info('POST $uri (model=${request.model})');
 
+    final stopwatch = Stopwatch()..start();
     final response = await _httpClient.post(
       uri,
       headers: {
@@ -166,11 +171,16 @@ class MistralClient {
       body: jsonEncode(request.toJson()),
     );
 
-    _log.info('Chat API response status: ${response.statusCode}');
+    stopwatch.stop();
+    _log.info(
+      'Response ${response.statusCode} in ${stopwatch.elapsedMilliseconds}ms',
+    );
 
     if (response.statusCode != 200) {
       final apiErrorMessage = _parseErrorMessage(response.body);
-      _log.warning('Chat API error ${response.statusCode}: $apiErrorMessage');
+      _log.warning(
+        'Chat API error ${response.statusCode}: $apiErrorMessage',
+      );
       throw MistralApiException(
         'Chat API request failed',
         statusCode: response.statusCode,

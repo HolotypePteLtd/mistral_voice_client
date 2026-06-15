@@ -14,8 +14,9 @@ class ChatRequest {
   /// Maximum number of tokens to generate.
   final int? maxTokens;
 
-  /// If true, the response will be a JSON object.
-  final bool? responseFormat;
+  /// Response format: `true` for json_object, or a `Map` for json_schema.
+  /// Example: `{'type': 'json_schema', 'json_schema': {...}}`
+  final Object? responseFormat;
 
   /// Top-p sampling (nucleus sampling).
   final double? topP;
@@ -52,13 +53,38 @@ class ChatRequest {
     );
   }
 
+  /// Creates a request with JSON schema enforcement.
+  factory ChatRequest.withSchema({
+    required String model,
+    required List<ChatMessage> messages,
+    required String schemaName,
+    required Map<String, dynamic> schema,
+    double? temperature,
+  }) {
+    return ChatRequest(
+      model: model,
+      messages: messages,
+      temperature: temperature,
+      responseFormat: {
+        'type': 'json_schema',
+        'json_schema': {
+          'name': schemaName,
+          'strict': true,
+          'schema': schema,
+        },
+      },
+    );
+  }
+
   Map<String, dynamic> toJson() => {
     'model': model,
     'messages': messages.map((m) => m.toJson()).toList(),
     if (temperature != null) 'temperature': temperature,
     if (maxTokens != null) 'max_tokens': maxTokens,
-    if (responseFormat == true)
-      'response_format': {'type': 'json_object'},
+    if (responseFormat != null)
+      'response_format': responseFormat is bool
+          ? {'type': 'json_object'}
+          : responseFormat,
     if (topP != null) 'top_p': topP,
     if (seed != null) 'seed': seed,
   };
