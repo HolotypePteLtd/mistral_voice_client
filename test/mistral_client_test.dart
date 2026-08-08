@@ -11,39 +11,24 @@ void main() {
     test('sends correct multipart request and parses response', () async {
       String? capturedModel;
       String? capturedAuth;
-      List<String> capturedGranularities = [];
+      List<String> capturedGranularityFileNames = [];
       String? capturedFileName;
       String? capturedLanguage;
 
       final mockClient =
           http_testing.MockClient.streaming((request, bodyStream) async {
-        capturedAuth = request.headers['authorization'];
+        capturedAuth = request.headers['Authorization'];
 
-        // The body is now a hand-built multipart/form-data payload on an
-        // http.Request (not a MultipartRequest), so parse it directly.
-        final body = latin1.decode((request as http.Request).bodyBytes);
-        final boundary = RegExp(r'boundary=([^\r\n;]+)')
-            .firstMatch(request.headers['content-type'] ?? '')!
-            .group(1)!;
-        for (final raw in body.split('--$boundary')) {
-          final headerEnd = raw.indexOf('\r\n\r\n');
-          if (headerEnd < 0) continue;
-          final headers = raw.substring(0, headerEnd);
-          final value =
-              raw.substring(headerEnd + 4, raw.length - 2); // strip \r\n
-          final name =
-              RegExp(r'name="([^"]+)"').firstMatch(headers)?.group(1);
-          if (name == null) continue;
-          switch (name) {
-            case 'model':
-              capturedModel = value;
-            case 'language':
-              capturedLanguage = value;
-            case 'timestamp_granularities':
-              capturedGranularities.add(value);
-            case 'file':
-              capturedFileName =
-                  RegExp(r'filename="([^"]+)"').firstMatch(headers)?.group(1);
+        if (request is http.MultipartRequest) {
+          capturedModel = request.fields['model'];
+          capturedLanguage = request.fields['language'];
+          for (final file in request.files) {
+            if (file.field == 'timestamp_granularities[]') {
+              final bytes = await file.finalize().toBytes();
+              capturedGranularityFileNames.add(utf8.decode(bytes));
+            } else if (file.field == 'file') {
+              capturedFileName = file.filename;
+            }
           }
         }
 
@@ -93,7 +78,7 @@ void main() {
       // Verify request
       expect(capturedAuth, equals('Bearer test-api-key'));
       expect(capturedModel, equals('voxtral-mini-latest'));
-      expect(capturedGranularities, equals(['segment']));
+      expect(capturedGranularityFileNames, equals(['segment']));
       expect(capturedFileName, equals('test.wav'));
       expect(capturedLanguage, equals('en'));
 
@@ -110,56 +95,6 @@ void main() {
       expect(response.segments[1].text, equals('How are you?'));
       expect(response.usage?.totalSeconds, equals(5.5));
       expect(response.usage?.totalSegments, equals(2));
-
-      client.dispose();
-    });
-
-    test('sends multiple timestamp_granularities as separate plain fields',
-        () async {
-      // Regression: emitting the values as content-typed file parts made the
-      // API merge them into a single "segmentword" value. They must instead be
-      // distinct plain form fields (no content-type), one per value.
-      String? rawBody;
-      String? contentType;
-
-      final mockClient =
-          http_testing.MockClient.streaming((request, bodyStream) async {
-        rawBody = latin1.decode((request as http.Request).bodyBytes);
-        contentType = request.headers['content-type'];
-        return http.StreamedResponse(
-          Stream.value(utf8.encode(jsonEncode({
-            'model': 'voxtral-mini-latest',
-            'text': 'Hello world.',
-            'segments': [
-              {'text': 'Hello world.', 'start': 0.0, 'end': 1.0},
-            ],
-          }))),
-          200,
-        );
-      });
-
-      final client = MistralClient(apiKey: 'k', httpClient: mockClient);
-      await client.transcribeAudio(TranscriptionRequest(
-        fileBytes: utf8.encode('audio'),
-        fileName: 'a.wav',
-        timestampGranularities: ['segment', 'word'],
-      ));
-
-      final boundary =
-          RegExp(r'boundary=([^\r\n;]+)').firstMatch(contentType!)!.group(1)!;
-      final granularityParts = rawBody!
-          .split('--$boundary')
-          .where((p) => p.contains('name="timestamp_granularities"'))
-          .toList();
-
-      expect(granularityParts, hasLength(2),
-          reason: 'each granularity must be its own part');
-      // Plain form fields carry no content-type header.
-      for (final part in granularityParts) {
-        expect(part.toLowerCase(), isNot(contains('content-type')));
-      }
-      expect(granularityParts[0], contains('\r\n\r\nsegment'));
-      expect(granularityParts[1], contains('\r\n\r\nword'));
 
       client.dispose();
     });

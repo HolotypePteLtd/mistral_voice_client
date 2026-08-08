@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:logging/logging.dart';
@@ -55,20 +54,44 @@ class MistralClient {
 
     _log.info('POST $uri (model=${request.model})');
 
-    // Build the multipart body by hand rather than via [http.MultipartRequest].
-    // MultipartRequest emits each list value as a part carrying a
-    // `content-type` header, which the transcription API merges across
-    // repeated `timestamp_granularities` fields into a single concatenated
-    // value (e.g. "segmentword") and rejects with HTTP 422. Plain form fields
-    // (no content-type), as curl's `--form` produces, are parsed correctly as
-    // a list.
-    final boundary = 'mistral-${DateTime.now().microsecondsSinceEpoch}';
-    final body = _buildTranscriptionBody(request, boundary);
+    final multipartRequest = http.MultipartRequest('POST', uri);
+    multipartRequest.headers['Authorization'] = 'Bearer $_apiKey';
 
-    final httpRequest = http.Request('POST', uri)
-      ..headers['Authorization'] = 'Bearer $_apiKey'
-      ..headers['Content-Type'] = 'multipart/form-data; boundary=$boundary'
-      ..bodyBytes = body;
+    // Required field
+    multipartRequest.fields['model'] = request.model;
+
+    // Optional fields
+    if (request.language != null) {
+      multipartRequest.fields['language'] = request.language!;
+    }
+    if (request.temperature != null) {
+      multipartRequest.fields['temperature'] =
+          request.temperature!.toString();
+    }
+    if (request.diarize != null) {
+      multipartRequest.fields['diarize'] = request.diarize!.toString();
+    }
+    if (request.timestampGranularities != null) {
+      for (final granularity in request.timestampGranularities!) {
+        multipartRequest.files.add(http.MultipartFile.fromString(
+          'timestamp_granularities[]',
+          granularity,
+        ));
+      }
+    }
+
+    // File source
+    if (request.fileBytes != null) {
+      multipartRequest.files.add(http.MultipartFile.fromBytes(
+        'file',
+        request.fileBytes!,
+        filename: request.fileName!,
+      ));
+    } else if (request.fileUrl != null) {
+      multipartRequest.fields['file_url'] = request.fileUrl!;
+    } else if (request.fileId != null) {
+      multipartRequest.fields['file_id'] = request.fileId!;
+    }
 
     onProgress?.call(0.3);
 
@@ -76,7 +99,7 @@ class MistralClient {
     final stopwatch = Stopwatch()..start();
     final http.Response response;
     try {
-      final streamedResponse = await _httpClient.send(httpRequest);
+      final streamedResponse = await _httpClient.send(multipartRequest);
       response = await http.Response.fromStream(streamedResponse);
     } on SocketException catch (e) {
       throw MistralNetworkException(
@@ -124,68 +147,6 @@ class MistralClient {
     onProgress?.call(1.0);
 
     return result;
-  }
-
-  /// Build the `multipart/form-data` body for a transcription request.
-  ///
-  /// Each field becomes a plain form part (no `content-type` header), and
-  /// `timestamp_granularities` is emitted once per value so the API receives a
-  /// proper list rather than a single concatenated string. The audio file is
-  /// appended as a binary part when present.
-  Uint8List _buildTranscriptionBody(
-    TranscriptionRequest request,
-    String boundary,
-  ) {
-    final parts = <List<int>>[];
-    final sep = utf8.encode('--$boundary\r\n');
-    const crlf = [13, 10];
-
-    void field(String name, String value) {
-      parts
-        ..add(sep)
-        ..add(utf8.encode(
-            'content-disposition: form-data; name="$name"\r\n\r\n'))
-        ..add(utf8.encode(value))
-        ..add(crlf);
-    }
-
-    field('model', request.model);
-    if (request.language != null) field('language', request.language!);
-    if (request.temperature != null) {
-      field('temperature', request.temperature!.toString());
-    }
-    if (request.diarize != null) field('diarize', request.diarize!.toString());
-    if (request.timestampGranularities != null) {
-      for (final granularity in request.timestampGranularities!) {
-        field('timestamp_granularities', granularity);
-      }
-    }
-
-    if (request.fileBytes != null) {
-      parts
-        ..add(sep)
-        ..add(utf8.encode(
-            'content-disposition: form-data; name="file"; '
-            'filename="${request.fileName}"\r\n'
-            'content-type: application/octet-stream\r\n\r\n'))
-        ..add(request.fileBytes!)
-        ..add(crlf);
-    } else if (request.fileUrl != null) {
-      field('file_url', request.fileUrl!);
-    } else if (request.fileId != null) {
-      field('file_id', request.fileId!);
-    }
-
-    parts.add(utf8.encode('--$boundary--\r\n'));
-
-    final length = parts.fold<int>(0, (n, p) => n + p.length);
-    final body = Uint8List(length);
-    var offset = 0;
-    for (final p in parts) {
-      body.setRange(offset, offset + p.length, p);
-      offset += p.length;
-    }
-    return body;
   }
 
   /// Send a chat completion request to the Mistral API.
