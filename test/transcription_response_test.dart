@@ -171,6 +171,64 @@ void main() {
     });
   });
 
+  group('TranscriptionResponse word timestamps', () {
+    test('parses words array', () {
+      final json = {
+        'text': 'Hello world.',
+        'segments': [
+          {'text': 'Hello world.', 'start': 0.0, 'end': 1.2},
+        ],
+        'words': [
+          {'word': 'Hello', 'start': 0.0, 'end': 0.5},
+          {'word': 'world', 'start': 0.5, 'end': 1.0},
+        ],
+      };
+
+      final response = TranscriptionResponse.fromJson(json);
+
+      expect(response.words, hasLength(2));
+      expect(response.words[0].text, equals('Hello'));
+      expect(response.words[0].start, equals(0.0));
+      expect(response.words[0].end, equals(0.5));
+      expect(response.words[1].text, equals('world'));
+      expect(response.words[1].start, equals(0.5));
+      expect(response.words[1].end, equals(1.0));
+    });
+
+    test('missing words defaults to empty', () {
+      final response = TranscriptionResponse.fromJson({'text': 'hi'});
+
+      expect(response.words, isEmpty);
+    });
+
+    test('word text is trimmed', () {
+      final response = TranscriptionResponse.fromJson({
+        'text': 'hi',
+        'words': [
+          {'word': ' Hello ', 'start': 0.0, 'end': 0.5},
+        ],
+      });
+
+      expect(response.words.first.text, equals('Hello'));
+    });
+  });
+
+  group('TranscriptionWord', () {
+    test('toJson round-trips with fromJson', () {
+      const original = TranscriptionWord(
+        text: 'Hello',
+        start: 1.0,
+        end: 1.5,
+      );
+
+      final restored = TranscriptionWord.fromJson(original.toJson());
+
+      expect(restored.text, equals('Hello'));
+      expect(restored.start, equals(1.0));
+      expect(restored.end, equals(1.5));
+    });
+  });
+
   group('MistralUsage', () {
     test('fromJson parses correctly', () {
       final json = {

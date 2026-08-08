@@ -45,6 +45,49 @@ class TranscriptionSegment {
       'TranscriptionSegment("$text", ${start.toStringAsFixed(2)}s-${end.toStringAsFixed(2)}s)';
 }
 
+/// A single word with timing from the transcription response.
+///
+/// Emitted when the request includes `'word'` in
+/// `timestamp_granularities`. Unlike [TranscriptionSegment], words carry no
+/// confidence and are not grouped; consumers align them to text by index.
+class TranscriptionWord {
+  /// The transcribed word (trimmed of surrounding whitespace).
+  final String text;
+
+  /// Start time in seconds.
+  final double start;
+
+  /// End time in seconds.
+  final double end;
+
+  const TranscriptionWord({
+    required this.text,
+    required this.start,
+    required this.end,
+  });
+
+  factory TranscriptionWord.fromJson(Map<String, dynamic> json) {
+    return TranscriptionWord(
+      text: (json['word'] as String? ?? '').trim(),
+      start: (json['start'] as num? ?? 0).toDouble(),
+      end: (json['end'] as num? ?? 0).toDouble(),
+    );
+  }
+
+  /// Duration of this word in seconds.
+  double get durationSeconds => end - start;
+
+  Map<String, dynamic> toJson() => {
+        'word': text,
+        'start': start,
+        'end': end,
+      };
+
+  @override
+  String toString() =>
+      'TranscriptionWord("$text", ${start.toStringAsFixed(2)}s-${end.toStringAsFixed(2)}s)';
+}
+
 /// Response from the Mistral audio transcription API.
 class TranscriptionResponse {
   /// The model that was used for transcription.
@@ -62,6 +105,11 @@ class TranscriptionResponse {
   /// Individual transcription segments with timing.
   final List<TranscriptionSegment> segments;
 
+  /// Per-word timings, present only when the request asked for `'word'`
+  /// granularity. Words are flat across the whole clip (not grouped by
+  /// segment); align them to text by index.
+  final List<TranscriptionWord> words;
+
   /// API usage information.
   final MistralUsage? usage;
 
@@ -71,6 +119,7 @@ class TranscriptionResponse {
     this.language,
     this.duration,
     this.segments = const [],
+    this.words = const [],
     this.usage,
   });
 
@@ -82,6 +131,13 @@ class TranscriptionResponse {
             .toList() ??
         [];
 
+    final wordsData = json['words'] as List<dynamic>?;
+    final words = wordsData
+            ?.map((w) =>
+                TranscriptionWord.fromJson(w as Map<String, dynamic>))
+            .toList() ??
+        <TranscriptionWord>[];
+
     final usageData = json['usage'] as Map<String, dynamic>?;
 
     return TranscriptionResponse(
@@ -90,6 +146,7 @@ class TranscriptionResponse {
       language: json['language'] as String?,
       duration: (json['duration'] as num?)?.toDouble(),
       segments: segments,
+      words: words,
       usage: usageData != null ? MistralUsage.fromJson(usageData) : null,
     );
   }
